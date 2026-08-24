@@ -9,7 +9,14 @@ import 'src/startup_report.dart';
 import 'src/startup_tracker.dart';
 
 export 'src/startup_report.dart'
-    show StartupReport, StartupPhase, LaunchType, ExclusionReason;
+    show
+        ExclusionReason,
+        LaunchType,
+        StartupExcluded,
+        StartupMeasurement,
+        StartupPhase,
+        StartupPhases,
+        StartupReport;
 
 /// Entry point.
 ///
@@ -17,24 +24,6 @@ export 'src/startup_report.dart'
 /// void main() {
 ///   FlutterStartupMetrics.start();
 ///   runApp(const MyApp());
-/// }
-/// ```
-///
-/// Then, once your first screen has real content rather than a skeleton:
-///
-/// ```dart
-/// FlutterStartupMetrics.reportFullyDisplayed();
-/// ```
-///
-/// And wherever you report metrics:
-///
-/// ```dart
-/// final report = await FlutterStartupMetrics.report;
-/// if (report.isReportable) {
-///   send('app.startup.ttid', report.timeToInitialDisplay!);
-///   for (final phase in report.phases) {
-///     send('app.startup.${phase.name}', phase.duration);
-///   }
 /// }
 /// ```
 abstract final class FlutterStartupMetrics {
@@ -49,20 +38,47 @@ abstract final class FlutterStartupMetrics {
   }) =>
       _tracker.start(fullDisplayTimeout: fullDisplayTimeout);
 
-  /// Resolves once Flutter has rasterized its first frame.
+  /// Resolves once Flutter has rasterized its first frame — typically within a
+  /// second of launch.
   ///
-  /// Always resolves. An unusable launch — prewarmed, background-started, or
-  /// with an incoherent timeline — resolves with an [ExclusionReason] instead of
-  /// timings.
-  static Future<StartupReport> get report => _tracker.report;
+  /// Always resolves. A launch that cannot be measured honestly arrives as
+  /// [StartupExcluded] with a reason, never as a throw or a hang.
+  ///
+  /// ```dart
+  /// switch (await FlutterStartupMetrics.initialDisplay) {
+  ///   case StartupMeasurement(:final timeToInitialDisplay, :final phases):
+  ///     send('app.startup.ttid', timeToInitialDisplay);
+  ///     send('app.startup.engine_boot', phases.engineBoot);
+  ///   case StartupExcluded(:final reason):
+  ///     log('startup not measured: ${reason.name}');
+  /// }
+  /// ```
+  static Future<StartupReport> get initialDisplay => _tracker.initialDisplay;
 
   /// Resolves when [reportFullyDisplayed] is called, or when the timeout passes.
   ///
-  /// Separate from [report] so time-to-initial-display is not delayed by a call
-  /// your app may never make.
-  static Future<StartupReport> get fullDisplayReport =>
-      _tracker.fullDisplayReport;
+  /// Asynchronous because it waits on a call only your app can make, and that
+  /// call happens after data loads. It is deliberately a second future rather
+  /// than folded into [initialDisplay]: time-to-initial-display is available in
+  /// milliseconds and should not be held back by something that may take
+  /// seconds, or never arrive at all.
+  ///
+  /// Resolves as a [StartupMeasurement] with a null `timeToFullDisplay` if the
+  /// deadline passes without a call — so awaiting this is always safe.
+  static Future<StartupReport> get fullDisplay => _tracker.fullDisplay;
 
-  /// Marks the app as meaningfully usable. Only your app knows when that is.
+  /// Marks the app as meaningfully usable: first screen populated with real
+  /// content, not a skeleton or a spinner.
+  ///
+  /// Nothing can infer this, which is why it is your call to make. Typically it
+  /// goes wherever your first screen stops loading:
+  ///
+  /// ```dart
+  /// final data = await repository.loadDashboard();
+  /// setState(() => _data = data);
+  /// FlutterStartupMetrics.reportFullyDisplayed();
+  /// ```
+  ///
+  /// Second and late calls are ignored.
   static void reportFullyDisplayed() => _tracker.reportFullyDisplayed();
 }

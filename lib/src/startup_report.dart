@@ -2,8 +2,8 @@ import 'package:meta/meta.dart';
 
 /// How the process came to be running.
 ///
-/// There is no public API on either platform that reports this directly, so
-/// both values are inferred. [unknown] is returned rather than guessed when the
+/// There is no public API on either platform that reports this directly, so both
+/// values are inferred. [unknown] is returned rather than guessed when the
 /// signals are unavailable — a wrong classification is worse than an absent one,
 /// because it silently mixes populations in an aggregate.
 enum LaunchType {
@@ -18,16 +18,13 @@ enum LaunchType {
 }
 
 /// Why a launch produced no reportable measurement.
-///
-/// Exposed as a reason rather than a bool because "no data" is the state people
-/// most often need to debug, and a bare null tells them nothing.
 enum ExclusionReason {
   /// iOS prewarmed the process ahead of the user, so process start predates any
   /// user intent. Detected via the `ActivePrewarm` environment variable.
   prewarmed,
 
-  /// The process was started by the system rather than the user — a silent
-  /// push, a background job, a content provider access.
+  /// The process was started by the system rather than the user — a silent push,
+  /// a background job, a content provider access.
   backgroundLaunch,
 
   /// The measured window exceeds [StartupReport.maxPlausibleLaunch]. Dropped
@@ -35,124 +32,188 @@ enum ExclusionReason {
   /// real one and quietly corrupts percentiles.
   implausiblyLong,
 
-  /// An anchor arrived out of order, which means at least one clock moved.
+  /// An anchor arrived out of order, which means a clock moved mid-launch.
   incoherentTimeline,
 
   /// The platform did not return launch information.
   nativeDataUnavailable,
 }
 
-/// One measured segment of the launch.
+/// One named segment of the launch.
 @immutable
 class StartupPhase {
-  const StartupPhase({
-    required this.name,
-    required this.start,
-    required this.end,
-  });
+  const StartupPhase({required this.name, required this.duration});
 
   /// Stable identifier, safe to use as a metric name.
   final String name;
-
-  final DateTime start;
-  final DateTime end;
-
-  Duration get duration => end.difference(start);
+  final Duration duration;
 
   @override
   String toString() => '$name: ${duration.inMicroseconds / 1000}ms';
 }
 
+/// The launch broken into segments, addressable by name.
+///
+/// Two phases are nullable, and for different reasons. [hostStartup] exists only
+/// where the platform exposes a UI-creation boundary — Android's first
+/// `Activity.onCreate`; iOS has no comparable anchor. [frameScheduling]
+/// disappears when the frame's vsync arrived before Dart `main()` ran, which is
+/// legitimate and common: the engine's frame pipeline ticks independently of
+/// when Dart starts. In that case its time is absorbed into [dartBootstrap].
+///
+/// The named getters are for the common case of forwarding a fixed set of
+/// metrics. Use [all] when you want to forward whatever the platform gave you
+/// without enumerating it.
+@immutable
+class StartupPhases {
+  const StartupPhases({
+    required this.processInit,
+    required this.hostStartup,
+    required this.engineBoot,
+    required this.dartBootstrap,
+    required this.frameScheduling,
+    required this.frameBuild,
+    required this.rasterHandoff,
+    required this.frameRaster,
+  });
+
+  /// Process start until this library first ran — the OS, the runtime, and on
+  /// Android the zygote fork and class loading.
+  final Duration processInit;
+
+  /// Until the host created its UI container. Android only; null on iOS.
+  final Duration? hostStartup;
+
+  /// Until Dart `main()` was entered. The Flutter engine and Dart VM starting up.
+  final Duration engineBoot;
+
+  /// Your own work before the first frame began — everything above `runApp`.
+  final Duration dartBootstrap;
+
+  /// Vsync until the UI thread began building. Null when folded into
+  /// [dartBootstrap]; see the class doc.
+  final Duration? frameScheduling;
+
+  /// Building the first widget tree.
+  final Duration frameBuild;
+
+  /// Handing the built frame to the raster thread.
+  final Duration rasterHandoff;
+
+  /// Rasterizing — shader compilation, surface setup, GPU work.
+  final Duration frameRaster;
+
+  /// Every phase present on this platform, in launch order.
+  ///
+  /// Contiguous: these sum exactly to
+  /// [StartupMeasurement.timeToInitialDisplay], so nothing hides between them.
+  List<StartupPhase> get all => [
+        StartupPhase(name: 'processInit', duration: processInit),
+        if (hostStartup case final d?) StartupPhase(name: 'hostStartup', duration: d),
+        StartupPhase(name: 'engineBoot', duration: engineBoot),
+        StartupPhase(name: 'dartBootstrap', duration: dartBootstrap),
+        if (frameScheduling case final d?)
+          StartupPhase(name: 'frameScheduling', duration: d),
+        StartupPhase(name: 'frameBuild', duration: frameBuild),
+        StartupPhase(name: 'rasterHandoff', duration: rasterHandoff),
+        StartupPhase(name: 'frameRaster', duration: frameRaster),
+      ];
+
+  @override
+  String toString() => all.join(', ');
+}
+
 /// The result of measuring one app launch.
 ///
-/// Either [isReportable] is true and the timings are populated, or [exclusion]
-/// explains why this launch should not be counted.
-@immutable
-class StartupReport {
-  const StartupReport._({
+/// Sealed, so the two outcomes are distinguishable by the type system rather
+/// than by a boolean plus force-unwraps. Switch on it:
+///
+/// ```dart
+/// switch (await FlutterStartupMetrics.initialDisplay) {
+///   case StartupMeasurement(:final timeToInitialDisplay, :final phases):
+///     send('app.startup.ttid', timeToInitialDisplay);
+///     send('app.startup.engine_boot', phases.engineBoot);
+///   case StartupExcluded(:final reason):
+///     log('startup not measured: ${reason.name}');
+/// }
+/// ```
+sealed class StartupReport {
+  const StartupReport();
+
+  /// Launches longer than this are dropped. Datadog and Sentry converged on 60s
+  /// independently, which is reasonable evidence it is the right magnitude.
+  static const Duration maxPlausibleLaunch = Duration(seconds: 60);
+}
+
+/// A launch that was measured successfully. Every timing is non-null.
+final class StartupMeasurement extends StartupReport {
+  @internal
+  const StartupMeasurement({
     required this.launchType,
-    required this.exclusion,
     required this.processStart,
     required this.firstFrameRasterized,
     required this.phases,
-    required this.timeToFullDisplay,
+    this.timeToFullDisplay,
   });
-
-  /// Launches longer than this are dropped. Both Datadog and Sentry converged
-  /// on 60s independently, which is a reasonable signal that it is the right
-  /// order of magnitude.
-  static const Duration maxPlausibleLaunch = Duration(seconds: 60);
-
-  @internal
-  factory StartupReport.excluded(ExclusionReason reason) => StartupReport._(
-        launchType: LaunchType.unknown,
-        exclusion: reason,
-        processStart: null,
-        firstFrameRasterized: null,
-        phases: const [],
-        timeToFullDisplay: null,
-      );
-
-  @internal
-  factory StartupReport.measured({
-    required LaunchType launchType,
-    required DateTime processStart,
-    required DateTime firstFrameRasterized,
-    required List<StartupPhase> phases,
-    Duration? timeToFullDisplay,
-  }) =>
-      StartupReport._(
-        launchType: launchType,
-        exclusion: null,
-        processStart: processStart,
-        firstFrameRasterized: firstFrameRasterized,
-        phases: phases,
-        timeToFullDisplay: timeToFullDisplay,
-      );
 
   final LaunchType launchType;
 
-  /// Null when the launch was measured successfully.
-  final ExclusionReason? exclusion;
-
-  bool get isReportable => exclusion == null;
-
-  /// OS process start. Read from `Process.getStartUptimeMillis()` on Android and
+  /// OS process start: `Process.getStartUptimeMillis()` on Android,
   /// `sysctl(KERN_PROC_PID)` on iOS.
   ///
-  /// These are not the same event. Android's is the zygote fork; iOS's is the
-  /// exec. Treat cross-platform comparisons of the total with suspicion — the
-  /// endpoint is equivalent across platforms, the origin is not.
-  final DateTime? processStart;
+  /// These are not the same event — Android's is the zygote fork, iOS's the
+  /// exec. The endpoint is equivalent across platforms; the origin is not, so
+  /// treat cross-platform comparisons of the total with care.
+  final DateTime processStart;
 
   /// When Flutter finished rasterizing its first frame, from
-  /// `FramePhase.rasterFinishWallTime`. This is the endpoint that means the same
-  /// thing on every platform.
-  final DateTime? firstFrameRasterized;
+  /// `FramePhase.rasterFinishWallTime`. The endpoint that means the same thing
+  /// on every platform.
+  final DateTime firstFrameRasterized;
 
-  /// Ordered, contiguous segments from [processStart] to [firstFrameRasterized].
-  final List<StartupPhase> phases;
+  final StartupPhases phases;
 
-  /// Time from process start until the app called
-  /// `FlutterStartupMetrics.reportFullyDisplayed()`, if it ever did.
+  /// Process start until the app called `reportFullyDisplayed()`.
+  ///
+  /// Null on the report returned by `initialDisplay`, which resolves before any
+  /// such call can be meaningful, and null on `fullDisplay` when the app never
+  /// made the call.
   final Duration? timeToFullDisplay;
 
   /// Process start to first rasterized frame. The headline number.
-  Duration? get timeToInitialDisplay =>
-      processStart == null || firstFrameRasterized == null
-          ? null
-          : firstFrameRasterized!.difference(processStart!);
+  Duration get timeToInitialDisplay =>
+      firstFrameRasterized.difference(processStart);
+
+  @internal
+  StartupMeasurement withFullDisplay(Duration? ttfd) => StartupMeasurement(
+        launchType: launchType,
+        processStart: processStart,
+        firstFrameRasterized: firstFrameRasterized,
+        phases: phases,
+        timeToFullDisplay: ttfd,
+      );
 
   @override
   String toString() {
-    if (!isReportable) return 'StartupReport(excluded: ${exclusion!.name})';
+    final ttfd = timeToFullDisplay;
     final buf = StringBuffer()
-      ..writeln('StartupReport(${launchType.name}, '
-          'TTID ${timeToInitialDisplay!.inMilliseconds}ms'
-          '${timeToFullDisplay != null ? ', TTFD ${timeToFullDisplay!.inMilliseconds}ms' : ''})');
-    for (final p in phases) {
+      ..writeln('StartupMeasurement(${launchType.name}, '
+          'TTID ${timeToInitialDisplay.inMilliseconds}ms'
+          '${ttfd != null ? ', TTFD ${ttfd.inMilliseconds}ms' : ''})');
+    for (final p in phases.all) {
       buf.writeln('  $p');
     }
     return buf.toString();
   }
+}
+
+/// A launch that could not be measured honestly, and why.
+final class StartupExcluded extends StartupReport {
+  @internal
+  const StartupExcluded(this.reason);
+
+  final ExclusionReason reason;
+
+  @override
+  String toString() => 'StartupExcluded(${reason.name})';
 }

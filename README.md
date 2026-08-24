@@ -21,8 +21,9 @@ are not:
   displayed. Measured on a Galaxy S25 it reported 141.6 ms against a true
   180.1 ms — 21% short. On an emulator the same error was 2.4×.
 - **Native display callbacks** fire when the *platform* draws, which under
-  Flutter is not when Flutter drew. One major vendor's iOS anchor preceded
-  Flutter's first frame in 10 measured launches out of 10.
+  Flutter is not when Flutter drew. Reimplementing one major vendor's iOS anchor
+  from their source, it preceded Flutter's first frame in 10 simulator launches
+  out of 10 — often before Dart `main()` had even run.
 
 This package uses the one bridge Flutter sanctions for exactly this problem:
 `FrameTiming` stamps raster-end on both the engine's monotonic clock and the wall
@@ -41,36 +42,58 @@ void main() {
 }
 ```
 
-Then, wherever you report metrics:
+Then, wherever you report metrics. The report is a sealed type, so switching on
+it is exhaustive and needs no null checks:
 
 ```dart
-final report = await FlutterStartupMetrics.report;
-if (report.isReportable) {
-  send('app.startup.ttid', report.timeToInitialDisplay!);
-  for (final phase in report.phases) {
-    send('app.startup.${phase.name}', phase.duration);
-  }
-} else {
-  // 'prewarmed', 'backgroundLaunch', 'implausiblyLong', ...
-  log('startup not reportable: ${report.exclusion!.name}');
+switch (await FlutterStartupMetrics.initialDisplay) {
+  case StartupMeasurement(:final timeToInitialDisplay, :final phases):
+    send('app.startup.ttid', timeToInitialDisplay);
+    send('app.startup.engine_boot', phases.engineBoot);
+    send('app.startup.first_raster', phases.frameRaster);
+
+  case StartupExcluded(:final reason):
+    // 'prewarmed', 'backgroundLaunch', 'implausiblyLong', ...
+    log('startup not measured: ${reason.name}');
+}
+```
+
+Phases are addressable by name for the fixed set you care about, and iterable
+when you would rather forward whatever the platform produced:
+
+```dart
+for (final phase in phases.all) {
+  send('app.startup.${phase.name}', phase.duration);
 }
 ```
 
 ### Time to full display
 
 Only your app knows when its first screen holds real content rather than a
-skeleton, so you have to say so:
+skeleton, so you have to say so. The call site is wherever that state lands —
+after the data arrives, not on a timer and not in `build()`:
 
 ```dart
-FlutterStartupMetrics.reportFullyDisplayed();
+Future<void> _loadDashboard() async {
+  final data = await repository.fetchDashboard();
+  if (!mounted) return;
+  setState(() => _data = data);
 
-final full = await FlutterStartupMetrics.fullDisplayReport;
+  FlutterStartupMetrics.reportFullyDisplayed();
+}
 ```
 
-`fullDisplayReport` is separate from `report` on purpose: time-to-initial-display
-is available in milliseconds and should not wait on a call your app might never
-make. If it never comes, the future resolves with a null `timeToFullDisplay`
-after 30 seconds rather than hanging.
+Then read it wherever you report:
+
+```dart
+final report = await FlutterStartupMetrics.fullDisplay;
+```
+
+`fullDisplay` is a second future rather than being folded into `initialDisplay`
+on purpose: time-to-initial-display is available within a second of launch and
+should not be held back by a call that may take seconds or never arrive. If it
+never arrives, the future still resolves after 30 seconds with a null
+`timeToFullDisplay`, so awaiting it is always safe.
 
 ## What you get
 
