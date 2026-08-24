@@ -48,9 +48,7 @@ class StartupMetricsInitProvider : ContentProvider() {
         app.registerActivityLifecycleCallbacks(
             object : Application.ActivityLifecycleCallbacks {
                 override fun onActivityCreated(activity: Activity, bundle: Bundle?) {
-                    if (firstActivityCreatedAtUptimeMs == null) {
-                        firstActivityCreatedAtUptimeMs = SystemClock.uptimeMillis()
-                    }
+                    firstActivityCreatedAtUptimeMs = SystemClock.uptimeMillis()
                     app.unregisterActivityLifecycleCallbacks(this)
                 }
 
@@ -82,16 +80,27 @@ class StartupMetricsInitProvider : ContentProvider() {
         selectionArgs: Array<out String>?,
     ): Int = 0
 
+    /**
+     * Best effort: on failure the struct keeps its default, which is not
+     * [ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND] but zero.
+     * Zero compares unequal to IMPORTANCE_FOREGROUND, so a device where this
+     * throws reports every launch as a background launch rather than silently
+     * reporting inflated timings. Dropping data beats publishing wrong data.
+     *
+     * This is a synchronous binder call to system_server on the main thread,
+     * before Application.onCreate returns — the most contended moment of the
+     * launch. It is the largest cost this library adds to the number it
+     * reports, and it is unavoidable: process importance is only meaningful at
+     * process creation, so it cannot be deferred to when the value is read.
+     */
     private fun readProcessImportance(): Int {
         val info = ActivityManager.RunningAppProcessInfo()
-        return try {
+        try {
             ActivityManager.getMyMemoryState(info)
-            info.importance
-        } catch (e: RuntimeException) {
-            // Defaults to IMPORTANCE_FOREGROUND, which biases towards reporting
-            // rather than silently dropping every launch on a broken device.
-            info.importance
+        } catch (_: RuntimeException) {
+            // Keep the default.
         }
+        return info.importance
     }
 
     companion object {

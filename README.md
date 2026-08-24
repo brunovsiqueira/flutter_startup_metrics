@@ -31,6 +31,13 @@ clock, so the offset between them converts every frame phase into epoch time. Th
 API exists because the Flutter team added it for this use case
 ([flutter/flutter#85139](https://github.com/flutter/flutter/issues/85139)).
 
+## Installation
+
+```yaml
+dependencies:
+  flutter_startup_metrics: ^0.1.0
+```
+
 ## Usage
 
 ```dart
@@ -153,6 +160,12 @@ and the reason is reported:
 - **iOS folds pre-`main()` into the first phase.** Capturing dyld time needs an
   Objective-C `+load` or a C constructor, which is machinery out of proportion to
   this package. `processInit` on iOS ends at plugin registration.
+- **It costs a little of what it measures.** On Android the package installs a
+  `ContentProvider` so it can take an anchor before `Application.onCreate`
+  returns, and reads process importance there — a synchronous binder call at the
+  most contended moment of the launch. Expect low single-digit milliseconds. The
+  importance read cannot be deferred, because it is only meaningful at process
+  creation. Nothing equivalent happens on iOS.
 - **Android needs API 24+** for `Process.getStartUptimeMillis()`. Below that it
   falls back to this library's own ContentProvider, which is later than the true
   process start — so it under-reports rather than inventing time.

@@ -17,11 +17,6 @@ import 'startup_report.dart';
 class StartupTracker {
   StartupTracker();
 
-  /// Default deadline for [reportFullyDisplayed]. Matches Sentry's, and exists
-  /// so an app that never makes the call leaves a resolved future rather than a
-  /// permanently pending one.
-  static const Duration defaultFullDisplayTimeout = Duration(seconds: 30);
-
   final Completer<StartupReport> _initialDisplay = Completer<StartupReport>();
   final Completer<StartupReport> _fullDisplay = Completer<StartupReport>();
 
@@ -29,7 +24,10 @@ class StartupTracker {
   DateTime? _fullyDisplayedAt;
   StartupReport? _initialReport;
   Timer? _fullDisplayDeadline;
-  bool _started = false;
+
+  /// Held so [_detach] can pass the exact instance back to the scheduler.
+  /// `removeTimingsCallback` asserts the callback is registered, so a null field
+  /// is what keeps detaching on a never-attached tracker from tripping it.
   TimingsCallback? _timingsCallback;
 
   Future<StartupReport> get initialDisplay => _initialDisplay.future;
@@ -37,9 +35,8 @@ class StartupTracker {
   Future<StartupReport> get fullDisplay => _fullDisplay.future;
 
   /// Begins measurement. Safe to call more than once; only the first counts.
-  void start({Duration fullDisplayTimeout = defaultFullDisplayTimeout}) {
-    if (_started) return;
-    _started = true;
+  void start({required Duration fullDisplayTimeout}) {
+    if (_dartMain != null) return;
 
     // The binding must exist before frame callbacks can be registered, and doing
     // it here means the host app does not have to remember to.
@@ -49,8 +46,12 @@ class StartupTracker {
     _timingsCallback = _onTimings;
     SchedulerBinding.instance.addTimingsCallback(_timingsCallback!);
 
-    _fullDisplayDeadline =
-        Timer(fullDisplayTimeout, () => _resolveFullDisplay(null));
+    _armFullDisplayDeadline(fullDisplayTimeout);
+  }
+
+  void _armFullDisplayDeadline(Duration timeout) {
+    _fullDisplayDeadline?.cancel();
+    _fullDisplayDeadline = Timer(timeout, _resolveFullDisplay);
   }
 
   /// Marks the moment the app is meaningfully usable.
@@ -59,20 +60,11 @@ class StartupTracker {
     _fullyDisplayedAt ??= DateTime.now().toUtc();
     // The initial report may not exist yet if the app reports full display
     // during the very first frame; _buildReport picks the timestamp up.
-    if (_initialReport != null) _resolveFullDisplay(_fullyDisplayedAt);
+    if (_initialReport != null) _resolveFullDisplay();
   }
 
-  void _onTimings(List<FrameTiming> timings) {
-    if (timings.isEmpty || _initialDisplay.isCompleted) return;
-
-    // Deferred frames never reach the engine and so never produce a FrameTiming.
-    // That makes the first entry here the first frame a user could actually see,
-    // which is the semantics we want and the reason this is not an
-    // addPostFrameCallback.
-    final first = timings.first;
-    _detach();
-    unawaited(_buildReport(first));
-  }
+  void _onTimings(List<FrameTiming> timings) =>
+      unawaited(debugHandleTimings(timings));
 
   void _detach() {
     final cb = _timingsCallback;
@@ -87,19 +79,20 @@ class StartupTracker {
     try {
       native = await StartupMetricsPlatform.instance.getLaunchInfo();
     } catch (_) {
-      native = null;
+      // A dead channel is indistinguishable from an unsupported platform, and
+      // both mean the same thing to the caller.
     }
 
     final report = _assemble(frame, native);
+    if (_initialDisplay.isCompleted) return;
     _initialReport = report;
-    if (!_initialDisplay.isCompleted) _initialDisplay.complete(report);
+    _initialDisplay.complete(report);
 
     // An app that reported full display before the first frame finished is
-    // unusual but legal; honour it rather than waiting for the deadline.
-    if (_fullyDisplayedAt != null) {
-      _resolveFullDisplay(_fullyDisplayedAt);
-    } else if (report is StartupExcluded) {
-      _resolveFullDisplay(null);
+    // unusual but legal; honour it rather than waiting for the deadline. An
+    // excluded launch has nothing further to wait for either.
+    if (_fullyDisplayedAt != null || report is StartupExcluded) {
+      _resolveFullDisplay();
     }
   }
 
@@ -119,19 +112,23 @@ class StartupTracker {
     // wall clock. Their difference converts every other phase into wall time,
     // which is the only way to line frame internals up against native anchors in
     // a release build.
-    final rasterFinishWall =
-        frame.timestampInMicroseconds(FramePhase.rasterFinishWallTime);
-    final offset = rasterFinishWall -
+    final rasterFinishWall = frame.timestampInMicroseconds(
+      FramePhase.rasterFinishWallTime,
+    );
+    final offset =
+        rasterFinishWall -
         frame.timestampInMicroseconds(FramePhase.rasterFinish);
 
     DateTime at(FramePhase phase) => DateTime.fromMicrosecondsSinceEpoch(
-          frame.timestampInMicroseconds(phase) + offset,
-          isUtc: true,
-        );
+      frame.timestampInMicroseconds(phase) + offset,
+      isUtc: true,
+    );
 
-    final firstFrame =
-        DateTime.fromMicrosecondsSinceEpoch(rasterFinishWall, isUtc: true);
-    var vsync = at(FramePhase.vsyncStart);
+    final firstFrame = DateTime.fromMicrosecondsSinceEpoch(
+      rasterFinishWall,
+      isUtc: true,
+    );
+    final vsync = at(FramePhase.vsyncStart);
     final buildStart = at(FramePhase.buildStart);
     final buildFinish = at(FramePhase.buildFinish);
     final rasterStart = at(FramePhase.rasterStart);
@@ -177,10 +174,10 @@ class StartupTracker {
         processInit: native.platformInit.difference(native.processStart),
         hostStartup: native.uiInit?.difference(native.platformInit),
         engineBoot: dartMain.difference(engineBootFrom),
-        dartBootstrap:
-            (hasVsyncBoundary ? vsync : buildStart).difference(dartMain),
-        frameScheduling:
-            hasVsyncBoundary ? buildStart.difference(vsync) : null,
+        dartBootstrap: (hasVsyncBoundary ? vsync : buildStart).difference(
+          dartMain,
+        ),
+        frameScheduling: hasVsyncBoundary ? buildStart.difference(vsync) : null,
         frameBuild: buildFinish.difference(buildStart),
         rasterHandoff: rasterStart.difference(buildFinish),
         frameRaster: firstFrame.difference(rasterStart),
@@ -188,18 +185,17 @@ class StartupTracker {
     );
   }
 
-  void _resolveFullDisplay(DateTime? fullyDisplayedAt) {
+  void _resolveFullDisplay() {
     if (_fullDisplay.isCompleted) return;
     _fullDisplayDeadline?.cancel();
     _fullDisplayDeadline = null;
 
-    _fullDisplay.complete(
-      switch (_initialReport) {
-        StartupMeasurement m => m.withFullDisplay(_clampToInitial(m, fullyDisplayedAt)),
-        StartupExcluded e => e,
-        null => const StartupExcluded(ExclusionReason.nativeDataUnavailable),
-      },
-    );
+    _fullDisplay.complete(switch (_initialReport) {
+      StartupMeasurement m => m.withFullDisplay(_clampToInitial(m)),
+      StartupExcluded e => e,
+      // The deadline fired before any frame was ever rasterized.
+      null => const StartupExcluded(ExclusionReason.noFrameRendered),
+    });
   }
 
   /// Full display cannot precede initial display, but the two timestamps come
@@ -211,9 +207,10 @@ class StartupTracker {
   /// than dropped. Datadog and Sentry both take `max(ttid, ttfd)` for the same
   /// reason. Emitting TTFD < TTID would read as broken data to anyone consuming
   /// it, which is worse than a sub-millisecond overstatement.
-  Duration? _clampToInitial(StartupMeasurement m, DateTime? fullyDisplayedAt) {
-    if (fullyDisplayedAt == null) return null;
-    final ttfd = fullyDisplayedAt.difference(m.processStart);
+  Duration? _clampToInitial(StartupMeasurement m) {
+    final at = _fullyDisplayedAt;
+    if (at == null) return null;
+    final ttfd = at.difference(m.processStart);
     return ttfd < m.timeToInitialDisplay ? m.timeToInitialDisplay : ttfd;
   }
 
@@ -234,13 +231,8 @@ class StartupTracker {
   /// way to exercise the abandoned-TTFD path without waiting 30 seconds.
   @visibleForTesting
   void debugSetDartMain(DateTime value, {Duration? fullDisplayTimeout}) {
-    _started = true;
     _dartMain = value;
-    if (fullDisplayTimeout != null) {
-      _fullDisplayDeadline?.cancel();
-      _fullDisplayDeadline =
-          Timer(fullDisplayTimeout, () => _resolveFullDisplay(null));
-    }
+    if (fullDisplayTimeout != null) _armFullDisplayDeadline(fullDisplayTimeout);
   }
 
   /// Releases the frame callback and pending timer. Tests only.

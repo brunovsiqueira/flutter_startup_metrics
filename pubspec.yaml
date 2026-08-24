@@ -4,6 +4,7 @@ description: >-
   rasterized, with a phase breakdown. Reports the numbers; sends them nowhere.
 version: 0.1.0
 homepage: https://github.com/brunovsiqueira/flutter_startup_metrics
+license: MIT
 repository: https://github.com/brunovsiqueira/flutter_startup_metrics
 issue_tracker: https://github.com/brunovsiqueira/flutter_startup_metrics/issues
 topics:

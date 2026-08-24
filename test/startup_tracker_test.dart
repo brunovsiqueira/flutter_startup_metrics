@@ -35,16 +35,15 @@ FrameTiming _frame({
   int rasterStart = 1250,
   int rasterFinish = 1400,
   int? rasterFinishWallTime,
-}) =>
-    FrameTiming(
-      vsyncStart: vsync,
-      buildStart: buildStart,
-      buildFinish: buildFinish,
-      rasterStart: rasterStart,
-      rasterFinish: rasterFinish,
-      rasterFinishWallTime:
-          rasterFinishWallTime ?? kMonoToWallOffsetUs + rasterFinish,
-    );
+}) => FrameTiming(
+  vsyncStart: vsync,
+  buildStart: buildStart,
+  buildFinish: buildFinish,
+  rasterStart: rasterStart,
+  rasterFinish: rasterFinish,
+  rasterFinishWallTime:
+      rasterFinishWallTime ?? kMonoToWallOffsetUs + rasterFinish,
+);
 
 NativeLaunchInfo _native({
   int processStartUs = 0,
@@ -53,15 +52,14 @@ NativeLaunchInfo _native({
   LaunchType launchType = LaunchType.cold,
   bool isPrewarmed = false,
   bool isBackgroundLaunch = false,
-}) =>
-    NativeLaunchInfo(
-      processStart: _wall(processStartUs),
-      platformInit: _wall(platformInitUs),
-      uiInit: uiInitUs == null ? null : _wall(uiInitUs),
-      launchType: launchType,
-      isPrewarmed: isPrewarmed,
-      isBackgroundLaunch: isBackgroundLaunch,
-    );
+}) => NativeLaunchInfo(
+  processStart: _wall(processStartUs),
+  platformInit: _wall(platformInitUs),
+  uiInit: uiInitUs == null ? null : _wall(uiInitUs),
+  launchType: launchType,
+  isPrewarmed: isPrewarmed,
+  isBackgroundLaunch: isBackgroundLaunch,
+);
 
 StartupTracker _tracker(NativeLaunchInfo? info, {int dartMainUs = 800}) {
   StartupMetricsPlatform.instance = _FakePlatform(info);
@@ -71,10 +69,16 @@ StartupTracker _tracker(NativeLaunchInfo? info, {int dartMainUs = 800}) {
 /// Asserts the launch was measurable and narrows the sealed type, so the tests
 /// below read the same way a consumer's code does.
 StartupMeasurement _measured(StartupReport report) {
-  expect(report, isA<StartupMeasurement>(),
-      reason: 'expected a measurable launch, got $report');
+  expect(
+    report,
+    isA<StartupMeasurement>(),
+    reason: 'expected a measurable launch, got $report',
+  );
   return report as StartupMeasurement;
 }
+
+Matcher _excludedBecause(ExclusionReason reason) =>
+    isA<StartupExcluded>().having((e) => e.reason, 'reason', reason);
 
 Duration _sum(StartupMeasurement m) =>
     m.phases.all.fold(Duration.zero, (acc, p) => acc + p.duration);
@@ -99,8 +103,11 @@ void main() {
       await tracker.debugHandleTimings([_frame()]);
       final report = _measured(await tracker.initialDisplay);
 
-      expect(_sum(report), report.timeToInitialDisplay,
-          reason: 'phases must be contiguous, or the breakdown misleads');
+      expect(
+        _sum(report),
+        report.timeToInitialDisplay,
+        reason: 'phases must be contiguous, or the breakdown misleads',
+      );
 
       expect(
         report.phases.all.map((p) => p.name),
@@ -116,26 +123,41 @@ void main() {
       );
     });
 
-    test('splits host startup when the platform supplies a UI anchor', () async {
-      final tracker = _tracker(_native(uiInitUs: 600));
-      await tracker.debugHandleTimings([_frame()]);
-      final report = _measured(await tracker.initialDisplay);
+    test(
+      'splits host startup when the platform supplies a UI anchor',
+      () async {
+        final tracker = _tracker(_native(uiInitUs: 600));
+        await tracker.debugHandleTimings([_frame()]);
+        final report = _measured(await tracker.initialDisplay);
 
-      expect(report.phases.hostStartup, isNotNull,
-          reason: 'Android splits Application/Activity setup out of engineBoot');
-      final names = report.phases.all.map((p) => p.name).toList();
-      expect(names.indexOf('hostStartup'), lessThan(names.indexOf('engineBoot')));
+        expect(
+          report.phases.hostStartup,
+          isNotNull,
+          reason: 'Android splits Application/Activity setup out of engineBoot',
+        );
+        final names = report.phases.all.map((p) => p.name).toList();
+        expect(
+          names.indexOf('hostStartup'),
+          lessThan(names.indexOf('engineBoot')),
+        );
 
-      expect(_sum(report), report.timeToInitialDisplay,
-          reason: 'the extra boundary must not break contiguity');
-    });
+        expect(
+          _sum(report),
+          report.timeToInitialDisplay,
+          reason: 'the extra boundary must not break contiguity',
+        );
+      },
+    );
 
     test('omits the UI phase when the platform has no such anchor', () async {
       final tracker = _tracker(_native());
       await tracker.debugHandleTimings([_frame()]);
       final report = _measured(await tracker.initialDisplay);
-      expect(report.phases.hostStartup, isNull,
-          reason: 'iOS should get one fewer phase, not a fabricated one');
+      expect(
+        report.phases.hostStartup,
+        isNull,
+        reason: 'iOS should get one fewer phase, not a fabricated one',
+      );
     });
 
     test('keeps launches whose vsync precedes Dart entry', () async {
@@ -145,24 +167,33 @@ void main() {
       await tracker.debugHandleTimings([_frame(vsync: 1000)]);
       final report = _measured(await tracker.initialDisplay);
 
-      expect(report.phases.frameScheduling, isNull,
-          reason: 'the vsync boundary folds away rather than voiding the launch');
+      expect(
+        report.phases.frameScheduling,
+        isNull,
+        reason: 'the vsync boundary folds away rather than voiding the launch',
+      );
       expect(report.phases.dartBootstrap, greaterThan(Duration.zero));
       expect(_sum(report), report.timeToInitialDisplay);
     });
 
-    test('toMap agrees with the named accessors and stays contiguous', () async {
-      final tracker = _tracker(_native(uiInitUs: 600));
-      await tracker.debugHandleTimings([_frame()]);
-      final report = _measured(await tracker.initialDisplay);
-      final map = report.phases.toMap();
+    test(
+      'toMap agrees with the named accessors and stays contiguous',
+      () async {
+        final tracker = _tracker(_native(uiInitUs: 600));
+        await tracker.debugHandleTimings([_frame()]);
+        final report = _measured(await tracker.initialDisplay);
+        final map = report.phases.toMap();
 
-      expect(map['engineBoot'], report.phases.engineBoot);
-      expect(map['hostStartup'], report.phases.hostStartup);
-      expect(map.keys, report.phases.all.map((p) => p.name),
-          reason: 'the map and the list must not drift apart');
-      expect(map.values.reduce((a, b) => a + b), report.timeToInitialDisplay);
-    });
+        expect(map['engineBoot'], report.phases.engineBoot);
+        expect(map['hostStartup'], report.phases.hostStartup);
+        expect(
+          map.keys,
+          report.phases.all.map((p) => p.name),
+          reason: 'the map and the list must not drift apart',
+        );
+        expect(map.values.reduce((a, b) => a + b), _sum(report));
+      },
+    );
 
     test('ignores frames after the first', () async {
       final tracker = _tracker(_native());
@@ -178,16 +209,16 @@ void main() {
       final tracker = _tracker(_native(isPrewarmed: true));
       await tracker.debugHandleTimings([_frame()]);
       final report = await tracker.initialDisplay;
-      expect(report, isA<StartupExcluded>()
-          .having((e) => e.reason, 'reason', ExclusionReason.prewarmed));
+      expect(report, _excludedBecause(ExclusionReason.prewarmed));
     });
 
     test('drops background launches', () async {
       final tracker = _tracker(_native(isBackgroundLaunch: true));
       await tracker.debugHandleTimings([_frame()]);
-      expect((await tracker.initialDisplay) as StartupExcluded,
-          isA<StartupExcluded>()
-              .having((e) => e.reason, 'reason', ExclusionReason.backgroundLaunch));
+      expect(
+        await tracker.initialDisplay,
+        _excludedBecause(ExclusionReason.backgroundLaunch),
+      );
     });
 
     test('drops launches past the plausibility ceiling', () async {
@@ -196,19 +227,21 @@ void main() {
         _native(processStartUs: -61 * Duration.microsecondsPerSecond),
       );
       await tracker.debugHandleTimings([_frame()]);
-      expect((await tracker.initialDisplay) as StartupExcluded,
-          isA<StartupExcluded>()
-              .having((e) => e.reason, 'reason', ExclusionReason.implausiblyLong));
+      expect(
+        await tracker.initialDisplay,
+        _excludedBecause(ExclusionReason.implausiblyLong),
+      );
     });
 
     test('drops timelines that run backwards', () async {
       // Platform init before process start is impossible; a clock moved.
-      final tracker = _tracker(_native(processStartUs: 600, platformInitUs: 500));
+      final tracker = _tracker(
+        _native(processStartUs: 600, platformInitUs: 500),
+      );
       await tracker.debugHandleTimings([_frame()]);
       expect(
         await tracker.initialDisplay,
-        isA<StartupExcluded>()
-            .having((e) => e.reason, 'reason', ExclusionReason.incoherentTimeline),
+        _excludedBecause(ExclusionReason.incoherentTimeline),
       );
     });
 
@@ -217,8 +250,7 @@ void main() {
       await tracker.debugHandleTimings([_frame()]);
       expect(
         await tracker.initialDisplay,
-        isA<StartupExcluded>()
-            .having((e) => e.reason, 'reason', ExclusionReason.nativeDataUnavailable),
+        _excludedBecause(ExclusionReason.nativeDataUnavailable),
       );
     });
 
@@ -229,8 +261,7 @@ void main() {
       await tracker.debugHandleTimings([_frame()]);
       expect(
         await tracker.initialDisplay,
-        isA<StartupExcluded>()
-            .having((e) => e.reason, 'reason', ExclusionReason.nativeDataUnavailable),
+        _excludedBecause(ExclusionReason.nativeDataUnavailable),
         reason: 'a dead channel must not leave initialDisplay() hanging',
       );
     });
@@ -258,23 +289,29 @@ void main() {
 
       final full = _measured(await tracker.fullDisplay);
       expect(full.timeToFullDisplay, isNotNull);
-      expect(full.timeToFullDisplay! >= full.timeToInitialDisplay, isTrue,
-          reason: 'TTFD < TTID reads as broken data to anyone consuming it');
+      expect(
+        full.timeToFullDisplay! >= full.timeToInitialDisplay,
+        isTrue,
+        reason: 'TTFD < TTID reads as broken data to anyone consuming it',
+      );
     });
 
     test('resolves with a null TTFD when the app never declares it', () async {
       StartupMetricsPlatform.instance = _FakePlatform(_native());
-      final tracker = StartupTracker()
-        ..debugSetDartMain(
-          _wall(800),
-          fullDisplayTimeout: const Duration(milliseconds: 10),
-        );
+      final tracker =
+          StartupTracker()..debugSetDartMain(
+            _wall(800),
+            fullDisplayTimeout: const Duration(milliseconds: 10),
+          );
       await tracker.debugHandleTimings([_frame()]);
       await tracker.initialDisplay;
 
       final full = _measured(await tracker.fullDisplay);
-      expect(full.timeToFullDisplay, isNull,
-          reason: 'an abandoned TTFD must resolve, not hang');
+      expect(
+        full.timeToFullDisplay,
+        isNull,
+        reason: 'an abandoned TTFD must resolve, not hang',
+      );
       tracker.dispose();
     });
 
@@ -285,6 +322,22 @@ void main() {
 
       final full = _measured(await tracker.fullDisplay);
       expect(full.timeToFullDisplay, isNotNull);
+    });
+
+    test('reports noFrameRendered when no frame ever arrives', () async {
+      StartupMetricsPlatform.instance = _FakePlatform(_native());
+      final tracker =
+          StartupTracker()..debugSetDartMain(
+            _wall(800),
+            fullDisplayTimeout: const Duration(milliseconds: 10),
+          );
+      // No frame is ever fed in — a headless or killed launch.
+      expect(
+        await tracker.fullDisplay,
+        _excludedBecause(ExclusionReason.noFrameRendered),
+        reason: 'the reason must say what happened, not blame the platform',
+      );
+      tracker.dispose();
     });
 
     test('an excluded launch still resolves the full-display future', () async {

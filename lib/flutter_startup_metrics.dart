@@ -29,14 +29,19 @@ export 'src/startup_report.dart'
 abstract final class FlutterStartupMetrics {
   static final StartupTracker _tracker = StartupTracker();
 
+  /// How long [fullDisplay] waits for [reportFullyDisplayed] before giving up.
+  ///
+  /// Matches Sentry's, and exists so an app that never makes the call leaves a
+  /// resolved future rather than a permanently pending one.
+  static const Duration defaultFullDisplayTimeout = Duration(seconds: 30);
+
   /// Begins measurement. Call as the first statement in `main()`.
   ///
   /// Calling it later still works but shortens the measured window, because the
   /// Dart-entry anchor is taken here.
   static void start({
-    Duration fullDisplayTimeout = StartupTracker.defaultFullDisplayTimeout,
-  }) =>
-      _tracker.start(fullDisplayTimeout: fullDisplayTimeout);
+    Duration fullDisplayTimeout = defaultFullDisplayTimeout,
+  }) => _tracker.start(fullDisplayTimeout: fullDisplayTimeout);
 
   /// Resolves once Flutter has rasterized its first frame — typically within a
   /// second of launch.

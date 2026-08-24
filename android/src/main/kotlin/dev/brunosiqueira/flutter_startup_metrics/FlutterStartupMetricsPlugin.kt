@@ -37,37 +37,42 @@ class FlutterStartupMetricsPlugin : FlutterPlugin, MethodChannel.MethodCallHandl
     }
 
     private fun launchInfo(): Map<String, Any?>? {
-        val providerUptimeMs = StartupMetricsInitProvider.createdAtUptimeMs
+        // Absent means the provider never ran, so the library is not installed
+        // the way it expects. Reporting nothing is the honest answer, and it
+        // keeps every value below non-null.
+        val providerUptimeMs = StartupMetricsInitProvider.createdAtUptimeMs ?: return null
 
         // Process.getStartUptimeMillis is API 24+. Below that, the earliest
         // knowable moment is our own ContentProvider, which is later than the
         // real process start but never earlier — so the metric under-reports
         // rather than inventing time.
-        val processStartUptimeMs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            sanityCheckedProcessStart(providerUptimeMs)
-        } else {
-            providerUptimeMs
-        } ?: return null
+        val processStartUptimeMs =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                sanityCheckedProcessStart(providerUptimeMs)
+            } else {
+                providerUptimeMs
+            }
 
-        val platformInitUptimeMs = providerUptimeMs ?: processStartUptimeMs
+        // Sampled once so every anchor in a report shares the same conversion.
+        // Sampling per anchor would fold clock drift into the phases.
+        val skewMs = System.currentTimeMillis() - SystemClock.uptimeMillis()
+        fun toEpochUs(uptimeMs: Long): Long = (uptimeMs + skewMs) * 1_000L
 
         val isBackground = StartupMetricsInitProvider.processImportance !=
             ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
 
         return mapOf(
-            "processStartEpochUs" to uptimeMsToEpochUs(processStartUptimeMs),
-            "platformInitEpochUs" to uptimeMsToEpochUs(platformInitUptimeMs),
+            "processStartEpochUs" to toEpochUs(processStartUptimeMs),
+            "platformInitEpochUs" to toEpochUs(providerUptimeMs),
             // Splits Android's host-startup span, which is otherwise dominated by
             // Application and Activity setup and would be misattributed to Flutter.
             "uiInitEpochUs" to StartupMetricsInitProvider
                 .firstActivityCreatedAtUptimeMs
-                ?.let { uptimeMsToEpochUs(it) },
-            // This library only ever observes a process it was loaded into, and
-            // the provider runs exactly once per process, so a launch we can see
+                ?.let { toEpochUs(it) },
+            // The provider runs exactly once per process, so a launch we can see
             // at all is a cold one. Warm starts reuse the process and are not
-            // measurable from process start; say "unknown" rather than guess.
-            "launchType" to if (providerUptimeMs != null) "cold" else "unknown",
-            "isPrewarmed" to false, // iOS-only concept
+            // measurable from process start.
+            "launchType" to "cold",
             "isBackgroundLaunch" to isBackground,
         )
     }
@@ -77,26 +82,20 @@ class FlutterStartupMetricsPlugin : FlutterPlugin, MethodChannel.MethodCallHandl
      * values. Cross-check it against our provider: process start must precede
      * provider creation, and not by an absurd margin.
      */
-    private fun sanityCheckedProcessStart(providerUptimeMs: Long?): Long? {
+    private fun sanityCheckedProcessStart(providerUptimeMs: Long): Long {
         val reported = Process.getStartUptimeMillis()
-        if (providerUptimeMs == null) return reported
         val precedesProvider = reported <= providerUptimeMs
         val withinReason = providerUptimeMs - reported <= MAX_PROCESS_START_LEAD_MS
         return if (precedesProvider && withinReason) reported else providerUptimeMs
     }
 
-    /**
-     * Converts an uptime-domain value to wall-clock epoch microseconds.
-     *
-     * The skew is sampled once, here, so every anchor in a report shares the same
-     * conversion. Sampling it per-anchor would fold clock drift into the phases.
-     */
-    private fun uptimeMsToEpochUs(uptimeMs: Long): Long {
-        val skewMs = System.currentTimeMillis() - SystemClock.uptimeMillis()
-        return (uptimeMs + skewMs) * 1_000L
-    }
-
     private companion object {
+        /**
+         * Kept in step with `StartupReport.maxPlausibleLaunch` on the Dart side.
+         * The two are different checks — this one picks which timestamp to
+         * trust, that one drops the report — but they encode the same judgement
+         * about what counts as a plausible launch.
+         */
         const val MAX_PROCESS_START_LEAD_MS = 60_000L
     }
 }

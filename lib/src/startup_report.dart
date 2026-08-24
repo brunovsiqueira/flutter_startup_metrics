@@ -10,10 +10,11 @@ enum LaunchType {
   /// The process was created for this launch.
   cold,
 
-  /// The process already existed; the UI was recreated.
-  warm,
-
-  /// Could not be determined on this platform or OS version.
+  /// Could not be determined.
+  ///
+  /// Warm starts land here. This library only ever loads into a process it was
+  /// created with, so a launch it can observe at all is a cold one — a warm
+  /// start reuses the process and is not measurable from process start.
   unknown,
 }
 
@@ -37,6 +38,10 @@ enum ExclusionReason {
 
   /// The platform did not return launch information.
   nativeDataUnavailable,
+
+  /// Flutter never rasterized a frame before the full-display deadline — a
+  /// headless or killed launch. Only ever reported by `fullDisplay`.
+  noFrameRendered,
 }
 
 /// One named segment of the launch.
@@ -113,24 +118,25 @@ class StartupPhases {
   /// send('app.startup', phases.toMap());
   /// ```
   Map<String, Duration> toMap() => {
-        for (final phase in all) phase.name: phase.duration,
-      };
+    for (final phase in all) phase.name: phase.duration,
+  };
 
   /// Every phase present on this platform, in launch order.
   ///
   /// Use when order matters or when your backend takes one metric at a time;
   /// otherwise prefer [toMap].
   List<StartupPhase> get all => [
-        StartupPhase(name: 'processInit', duration: processInit),
-        if (hostStartup case final d?) StartupPhase(name: 'hostStartup', duration: d),
-        StartupPhase(name: 'engineBoot', duration: engineBoot),
-        StartupPhase(name: 'dartBootstrap', duration: dartBootstrap),
-        if (frameScheduling case final d?)
-          StartupPhase(name: 'frameScheduling', duration: d),
-        StartupPhase(name: 'frameBuild', duration: frameBuild),
-        StartupPhase(name: 'rasterHandoff', duration: rasterHandoff),
-        StartupPhase(name: 'frameRaster', duration: frameRaster),
-      ];
+    StartupPhase(name: 'processInit', duration: processInit),
+    if (hostStartup case final d?)
+      StartupPhase(name: 'hostStartup', duration: d),
+    StartupPhase(name: 'engineBoot', duration: engineBoot),
+    StartupPhase(name: 'dartBootstrap', duration: dartBootstrap),
+    if (frameScheduling case final d?)
+      StartupPhase(name: 'frameScheduling', duration: d),
+    StartupPhase(name: 'frameBuild', duration: frameBuild),
+    StartupPhase(name: 'rasterHandoff', duration: rasterHandoff),
+    StartupPhase(name: 'frameRaster', duration: frameRaster),
+  ];
 
   @override
   String toString() => all.join(', ');
@@ -199,20 +205,22 @@ final class StartupMeasurement extends StartupReport {
 
   @internal
   StartupMeasurement withFullDisplay(Duration? ttfd) => StartupMeasurement(
-        launchType: launchType,
-        processStart: processStart,
-        firstFrameRasterized: firstFrameRasterized,
-        phases: phases,
-        timeToFullDisplay: ttfd,
-      );
+    launchType: launchType,
+    processStart: processStart,
+    firstFrameRasterized: firstFrameRasterized,
+    phases: phases,
+    timeToFullDisplay: ttfd,
+  );
 
   @override
   String toString() {
     final ttfd = timeToFullDisplay;
-    final buf = StringBuffer()
-      ..writeln('StartupMeasurement(${launchType.name}, '
+    final buf =
+        StringBuffer()..writeln(
+          'StartupMeasurement(${launchType.name}, '
           'TTID ${timeToInitialDisplay.inMilliseconds}ms'
-          '${ttfd != null ? ', TTFD ${ttfd.inMilliseconds}ms' : ''})');
+          '${ttfd != null ? ', TTFD ${ttfd.inMilliseconds}ms' : ''})',
+        );
     for (final p in phases.all) {
       buf.writeln('  $p');
     }

@@ -12,14 +12,16 @@ class StartupMetricsPlatform {
 
   static StartupMetricsPlatform instance = StartupMetricsPlatform();
 
-  static const MethodChannel _channel =
-      MethodChannel('dev.brunosiqueira/flutter_startup_metrics');
+  static const MethodChannel _channel = MethodChannel(
+    'dev.brunosiqueira/flutter_startup_metrics',
+  );
 
   /// Returns null when the platform has no launch data — an unsupported OS
   /// version, or a platform with no native implementation.
   Future<NativeLaunchInfo?> getLaunchInfo() async {
-    final result =
-        await _channel.invokeMethod<Map<Object?, Object?>>('getLaunchInfo');
+    final result = await _channel.invokeMethod<Map<Object?, Object?>>(
+      'getLaunchInfo',
+    );
     return NativeLaunchInfo.fromMap(result);
   }
 }

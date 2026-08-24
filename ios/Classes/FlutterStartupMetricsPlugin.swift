@@ -52,8 +52,9 @@ public class FlutterStartupMetricsPlugin: NSObject, FlutterPlugin {
         // iOS 15+ may start the process well before the user taps the icon. When
         // it does, process start is not the start of anything the user
         // experienced, and the only honest move is to report nothing.
-        let isPrewarmed =
-            ProcessInfo.processInfo.environment["ActivePrewarm"] == "1"
+        // getenv rather than ProcessInfo.environment, which materializes and
+        // bridges the entire environment dictionary to read one key.
+        let isPrewarmed = getenv("ActivePrewarm").map { String(cString: $0) } == "1"
 
         return [
             "processStartEpochUs": epochMicros(processStart),

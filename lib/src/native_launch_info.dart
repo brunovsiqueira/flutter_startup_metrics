@@ -49,16 +49,20 @@ class NativeLaunchInfo {
 
     final uiInitUs = map['uiInitEpochUs'];
     return NativeLaunchInfo(
-      processStart:
-          DateTime.fromMicrosecondsSinceEpoch(processStartUs, isUtc: true),
-      platformInit:
-          DateTime.fromMicrosecondsSinceEpoch(platformInitUs, isUtc: true),
-      uiInit: uiInitUs is int
-          ? DateTime.fromMicrosecondsSinceEpoch(uiInitUs, isUtc: true)
-          : null,
+      processStart: DateTime.fromMicrosecondsSinceEpoch(
+        processStartUs,
+        isUtc: true,
+      ),
+      platformInit: DateTime.fromMicrosecondsSinceEpoch(
+        platformInitUs,
+        isUtc: true,
+      ),
+      uiInit:
+          uiInitUs is int
+              ? DateTime.fromMicrosecondsSinceEpoch(uiInitUs, isUtc: true)
+              : null,
       launchType: switch (map['launchType']) {
         'cold' => LaunchType.cold,
-        'warm' => LaunchType.warm,
         _ => LaunchType.unknown,
       },
       isPrewarmed: map['isPrewarmed'] == true,

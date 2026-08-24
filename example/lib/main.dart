@@ -50,7 +50,8 @@ class _LauncherState extends State<Launcher> {
 
   @override
   Widget build(BuildContext context) =>
-      _screen ?? const Scaffold(body: Center(child: CircularProgressIndicator()));
+      _screen ??
+      const Scaffold(body: Center(child: CircularProgressIndicator()));
 }
 
 /// A first screen with its own async work. Reports once the content is real.
@@ -79,15 +80,21 @@ class _DashboardState extends State<Dashboard> {
     // timer, not in build(), and not in main() — at main() nothing is displayed
     // yet, so reporting there would make TTFD meaningless.
     FlutterStartupMetrics.reportFullyDisplayed();
+
+    // Where you would forward the numbers to whatever you already run. Done
+    // here rather than in build(), which Flutter may call many times.
+    final report = await FlutterStartupMetrics.fullDisplay;
+    debugPrint('STARTUP_METRICS $report');
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Startup metrics')),
-        body: _data == null
+    appBar: AppBar(title: const Text('Startup metrics')),
+    body:
+        _data == null
             ? const Center(child: CircularProgressIndicator())
             : const StartupSummary(),
-      );
+  );
 }
 
 /// The other possible first screen. It has nothing to wait for, so it reports as
@@ -110,9 +117,8 @@ class _SignInState extends State<SignIn> {
   }
 
   @override
-  Widget build(BuildContext context) => const Scaffold(
-        body: Center(child: Text('Sign in')),
-      );
+  Widget build(BuildContext context) =>
+      const Scaffold(body: Center(child: Text('Sign in')));
 }
 
 /// Reads the report and renders whichever outcome the launch produced.
@@ -131,8 +137,9 @@ class StartupSummary extends StatelessWidget {
           return const Center(child: CircularProgressIndicator());
         }
         return switch (report) {
-          StartupExcluded(:final reason) =>
-            Center(child: Text('Launch not measured: ${reason.name}')),
+          StartupExcluded(:final reason) => Center(
+            child: Text('Launch not measured: ${reason.name}'),
+          ),
           StartupMeasurement() => _MeasurementView(report),
         };
       },
@@ -147,9 +154,6 @@ class _MeasurementView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // How you would forward the whole breakdown in one call.
-    debugPrint('STARTUP_METRICS $report');
-
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
