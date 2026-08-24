@@ -1,0 +1,14 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!--
+          Declared here so it merges into host apps automatically. It runs before
+          Application.onCreate returns, which is the earliest hook available to a
+          library, and does nothing but record when that happened.
+        -->
+        <provider
+            android:name="dev.brunosiqueira.flutter_startup_metrics.StartupMetricsInitProvider"
+            android:authorities="${applicationId}.flutterstartupmetrics"
+            android:exported="false"
+            android:initOrder="1000" />
+    </application>
+</manifest>
