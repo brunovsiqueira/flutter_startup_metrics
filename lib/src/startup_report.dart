@@ -103,10 +103,23 @@ class StartupPhases {
   /// Rasterizing — shader compilation, surface setup, GPU work.
   final Duration frameRaster;
 
+  /// Every phase present on this platform, keyed by name.
+  ///
+  /// The usual way to forward the whole breakdown, since most metrics backends
+  /// accept a map. Contiguous: the values sum exactly to
+  /// [StartupMeasurement.timeToInitialDisplay].
+  ///
+  /// ```dart
+  /// send('app.startup', phases.toMap());
+  /// ```
+  Map<String, Duration> toMap() => {
+        for (final phase in all) phase.name: phase.duration,
+      };
+
   /// Every phase present on this platform, in launch order.
   ///
-  /// Contiguous: these sum exactly to
-  /// [StartupMeasurement.timeToInitialDisplay], so nothing hides between them.
+  /// Use when order matters or when your backend takes one metric at a time;
+  /// otherwise prefer [toMap].
   List<StartupPhase> get all => [
         StartupPhase(name: 'processInit', duration: processInit),
         if (hostStartup case final d?) StartupPhase(name: 'hostStartup', duration: d),

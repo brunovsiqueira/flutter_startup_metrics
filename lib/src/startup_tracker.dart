@@ -195,13 +195,26 @@ class StartupTracker {
 
     _fullDisplay.complete(
       switch (_initialReport) {
-        StartupMeasurement m => m.withFullDisplay(
-            fullyDisplayedAt?.difference(m.processStart),
-          ),
+        StartupMeasurement m => m.withFullDisplay(_clampToInitial(m, fullyDisplayedAt)),
         StartupExcluded e => e,
         null => const StartupExcluded(ExclusionReason.nativeDataUnavailable),
       },
     );
+  }
+
+  /// Full display cannot precede initial display, but the two timestamps come
+  /// from different clocks — `DateTime.now()` here, the engine's `system_clock`
+  /// for the frame — so a report made within a millisecond of the first frame
+  /// can land fractionally before it.
+  ///
+  /// That is measurement noise, not a corrupt launch, so it is clamped rather
+  /// than dropped. Datadog and Sentry both take `max(ttid, ttfd)` for the same
+  /// reason. Emitting TTFD < TTID would read as broken data to anyone consuming
+  /// it, which is worse than a sub-millisecond overstatement.
+  Duration? _clampToInitial(StartupMeasurement m, DateTime? fullyDisplayedAt) {
+    if (fullyDisplayedAt == null) return null;
+    final ttfd = fullyDisplayedAt.difference(m.processStart);
+    return ttfd < m.timeToInitialDisplay ? m.timeToInitialDisplay : ttfd;
   }
 
   /// Feeds a frame in directly, bypassing the scheduler.

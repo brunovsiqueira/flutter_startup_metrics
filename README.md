@@ -42,36 +42,47 @@ void main() {
 }
 ```
 
-Then, wherever you report metrics. The report is a sealed type, so switching on
-it is exhaustive and needs no null checks:
+Then, wherever you report metrics. The common case is one line of ceremony —
+`initialDisplay` is a sealed type, so this narrows it with no null checks:
+
+```dart
+if (await FlutterStartupMetrics.initialDisplay
+    case StartupMeasurement(:final timeToInitialDisplay, :final phases)) {
+  send('app.startup.ttid', timeToInitialDisplay);
+  send('app.startup.engine_boot', phases.engineBoot);
+}
+```
+
+Phases are addressable by name, as above. To forward the whole breakdown at
+once, `toMap()` gives you name-to-duration pairs in launch order:
+
+```dart
+send('app.startup', phases.toMap());
+```
+
+Use a full `switch` only when you want to know *why* a launch was not measured:
 
 ```dart
 switch (await FlutterStartupMetrics.initialDisplay) {
-  case StartupMeasurement(:final timeToInitialDisplay, :final phases):
+  case StartupMeasurement(:final timeToInitialDisplay):
     send('app.startup.ttid', timeToInitialDisplay);
-    send('app.startup.engine_boot', phases.engineBoot);
-    send('app.startup.first_raster', phases.frameRaster);
-
   case StartupExcluded(:final reason):
     // 'prewarmed', 'backgroundLaunch', 'implausiblyLong', ...
     log('startup not measured: ${reason.name}');
 }
 ```
 
-Phases are addressable by name for the fixed set you care about, and iterable
-when you would rather forward whatever the platform produced:
-
-```dart
-for (final phase in phases.all) {
-  send('app.startup.${phase.name}', phase.duration);
-}
-```
+There is deliberately no `Duration?` shortcut that skips this. Reporting a
+prewarmed or background-started launch as if it were real is the failure mode
+the package exists to prevent, so ignoring an exclusion is something you have to
+choose rather than something you get by default.
 
 ### Time to full display
 
 Only your app knows when its first screen holds real content rather than a
 skeleton, so you have to say so. The call site is wherever that state lands —
-after the data arrives, not on a timer and not in `build()`:
+after the data arrives, not on a timer, not in `build()`, and not in `main()`,
+where nothing is displayed yet and the metric would collapse into TTID:
 
 ```dart
 Future<void> _loadDashboard() async {
@@ -82,6 +93,10 @@ Future<void> _loadDashboard() async {
   FlutterStartupMetrics.reportFullyDisplayed();
 }
 ```
+
+If your first screen is conditional — an auth check, onboarding, a deep link —
+every branch that can be a first screen needs the call. Launches that land on a
+branch you missed report no TTFD at all. The example app shows this shape.
 
 Then read it wherever you report:
 

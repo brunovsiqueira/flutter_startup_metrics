@@ -151,6 +151,19 @@ void main() {
       expect(_sum(report), report.timeToInitialDisplay);
     });
 
+    test('toMap agrees with the named accessors and stays contiguous', () async {
+      final tracker = _tracker(_native(uiInitUs: 600));
+      await tracker.debugHandleTimings([_frame()]);
+      final report = _measured(await tracker.initialDisplay);
+      final map = report.phases.toMap();
+
+      expect(map['engineBoot'], report.phases.engineBoot);
+      expect(map['hostStartup'], report.phases.hostStartup);
+      expect(map.keys, report.phases.all.map((p) => p.name),
+          reason: 'the map and the list must not drift apart');
+      expect(map.values.reduce((a, b) => a + b), report.timeToInitialDisplay);
+    });
+
     test('ignores frames after the first', () async {
       final tracker = _tracker(_native());
       await tracker.debugHandleTimings([_frame()]);
@@ -234,6 +247,19 @@ void main() {
 
       expect(full.timeToFullDisplay, isNotNull);
       expect(full.timeToFullDisplay! >= full.timeToInitialDisplay, isTrue);
+    });
+
+    test('never reports full display as earlier than initial display', () async {
+      // The two timestamps come from different clocks, so a report made within a
+      // millisecond of the first frame can land fractionally before it.
+      final tracker = _tracker(_native());
+      tracker.reportFullyDisplayed(); // before the frame is even assembled
+      await tracker.debugHandleTimings([_frame()]);
+
+      final full = _measured(await tracker.fullDisplay);
+      expect(full.timeToFullDisplay, isNotNull);
+      expect(full.timeToFullDisplay! >= full.timeToInitialDisplay, isTrue,
+          reason: 'TTFD < TTID reads as broken data to anyone consuming it');
     });
 
     test('resolves with a null TTFD when the app never declares it', () async {

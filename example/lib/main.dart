@@ -12,61 +12,112 @@ class ExampleApp extends StatelessWidget {
   const ExampleApp({super.key});
 
   @override
-  Widget build(BuildContext context) => const MaterialApp(home: DashboardScreen());
+  Widget build(BuildContext context) => const MaterialApp(home: Launcher());
 }
 
-/// Stands in for a real first screen: it paints immediately with a spinner, then
-/// fills in once its data arrives. The gap between those two moments is exactly
-/// what time-to-full-display measures, and why nothing but the app can report it.
-class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+/// The case that makes time-to-full-display awkward in real apps: which screen
+/// the user lands on is not known until an async check has run, so there is no
+/// single place to report from. Every branch that can be a first screen needs
+/// the call, and missing one means those launches silently report no TTFD.
+class Launcher extends StatefulWidget {
+  const Launcher({super.key});
 
   @override
-  State<DashboardScreen> createState() => _DashboardScreenState();
+  State<Launcher> createState() => _LauncherState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
+class _LauncherState extends State<Launcher> {
+  Widget? _screen;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolveFirstScreen();
+  }
+
+  Future<void> _resolveFirstScreen() async {
+    // Stands in for reading a token, checking onboarding state, or resolving a
+    // deep link — work that happens after the first frame has already painted.
+    final signedIn = await _fakeAuthCheck();
+    if (!mounted) return;
+    setState(() => _screen = signedIn ? const Dashboard() : const SignIn());
+  }
+
+  Future<bool> _fakeAuthCheck() async {
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    return true;
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      _screen ?? const Scaffold(body: Center(child: CircularProgressIndicator()));
+}
+
+/// A first screen with its own async work. Reports once the content is real.
+class Dashboard extends StatefulWidget {
+  const Dashboard({super.key});
+
+  @override
+  State<Dashboard> createState() => _DashboardState();
+}
+
+class _DashboardState extends State<Dashboard> {
   String? _data;
 
   @override
   void initState() {
     super.initState();
-    _loadDashboard();
+    _load();
   }
 
-  Future<void> _loadDashboard() async {
-    // Whatever your first screen actually waits on: an API call, a database
-    // read, an auth check.
+  Future<void> _load() async {
     await Future<void>.delayed(const Duration(milliseconds: 400));
     if (!mounted) return;
-
     setState(() => _data = 'Dashboard content');
 
-    // The screen now holds real content rather than a spinner. This is the call
-    // site: after the state that makes the screen useful, not on a timer and not
-    // in build().
+    // The call site: after the state that makes the screen useful. Not on a
+    // timer, not in build(), and not in main() — at main() nothing is displayed
+    // yet, so reporting there would make TTFD meaningless.
     FlutterStartupMetrics.reportFullyDisplayed();
-
-    // In a real app this is where you would forward the numbers to whatever you
-    // already run — a RUM SDK, an analytics event, a log line.
-    final report = await FlutterStartupMetrics.fullDisplay;
-    debugPrint('STARTUP_METRICS $report');
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Startup metrics')),
-      body: _data == null
-          ? const Center(child: CircularProgressIndicator())
-          : const _StartupSummary(),
-    );
-  }
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('Startup metrics')),
+        body: _data == null
+            ? const Center(child: CircularProgressIndicator())
+            : const StartupSummary(),
+      );
 }
 
-/// Reads both reports and renders whichever outcome the launch produced.
-class _StartupSummary extends StatelessWidget {
-  const _StartupSummary();
+/// The other possible first screen. It has nothing to wait for, so it reports as
+/// soon as it is built — but it still has to report, or launches that land here
+/// would have no TTFD at all.
+class SignIn extends StatefulWidget {
+  const SignIn({super.key});
+
+  @override
+  State<SignIn> createState() => _SignInState();
+}
+
+class _SignInState extends State<SignIn> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      FlutterStartupMetrics.reportFullyDisplayed();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => const Scaffold(
+        body: Center(child: Text('Sign in')),
+      );
+}
+
+/// Reads the report and renders whichever outcome the launch produced.
+class StartupSummary extends StatelessWidget {
+  const StartupSummary({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -79,12 +130,9 @@ class _StartupSummary extends StatelessWidget {
         if (report == null) {
           return const Center(child: CircularProgressIndicator());
         }
-
-        // Sealed, so this is exhaustive and needs no null checks.
         return switch (report) {
-          StartupExcluded(:final reason) => Center(
-              child: Text('Launch not measured: ${reason.name}'),
-            ),
+          StartupExcluded(:final reason) =>
+            Center(child: Text('Launch not measured: ${reason.name}')),
           StartupMeasurement() => _MeasurementView(report),
         };
       },
@@ -99,7 +147,9 @@ class _MeasurementView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final phases = report.phases;
+    // How you would forward the whole breakdown in one call.
+    debugPrint('STARTUP_METRICS $report');
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -112,35 +162,18 @@ class _MeasurementView extends StatelessWidget {
           Text('Time to full display: ${ttfd.inMilliseconds} ms'),
         Text('Launch type: ${report.launchType.name}'),
         const Divider(height: 32),
-
-        // Named access, for the fixed set of metrics you care about.
-        _Row('engineBoot', phases.engineBoot),
-        _Row('frameRaster', phases.frameRaster),
-        const Divider(height: 32),
-
-        // Or iterate, to forward whatever this platform produced without
-        // enumerating it.
-        for (final phase in phases.all) _Row(phase.name, phase.duration),
+        for (final entry in report.phases.toMap().entries)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(entry.key),
+                Text('${entry.value.inMicroseconds / 1000} ms'),
+              ],
+            ),
+          ),
       ],
     );
   }
-}
-
-class _Row extends StatelessWidget {
-  const _Row(this.label, this.duration);
-
-  final String label;
-  final Duration duration;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(label),
-            Text('${duration.inMicroseconds / 1000} ms'),
-          ],
-        ),
-      );
 }
