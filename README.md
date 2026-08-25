@@ -62,7 +62,7 @@ API exists because the Flutter team added it for this use case
 
 ```yaml
 dependencies:
-  flutter_startup_metrics: ^0.1.0
+  flutter_startup_metrics: ^0.1.1
 ```
 
 ## Usage

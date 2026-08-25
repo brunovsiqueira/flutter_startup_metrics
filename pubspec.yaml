@@ -1,9 +1,9 @@
 name: flutter_startup_metrics
 description: >-
-  Measure Flutter app startup time and cold start in production. Reports time to
-  initial display (TTID), time to full display (TTFD) and a phase breakdown, from
-  OS process start to the first frame actually rasterized.
-version: 0.1.0
+  Measure Flutter app startup time and cold start in production: time to initial
+  display (TTID), time to full display (TTFD), and a phase breakdown. Works in
+  release builds.
+version: 0.1.1
 homepage: https://github.com/brunovsiqueira/flutter_startup_metrics
 license: MIT
 repository: https://github.com/brunovsiqueira/flutter_startup_metrics
