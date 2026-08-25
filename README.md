@@ -120,21 +120,33 @@ never arrives, the future still resolves after 30 seconds with a null
 ## What you get
 
 A contiguous partition — the phases sum exactly to the total, so nothing hides
-between them. Real numbers from a Galaxy S25, profile build:
+between them. Real numbers, Galaxy S25, **release** build, median of 10 cold
+launches (total 83 ms):
 
-| Phase | Covers | Median |
-|---|---|---|
-| `processInit` | process start → this library loads | 65 ms |
-| `hostStartup` | → first `Activity.onCreate` (Android only) | 14 ms |
-| `engineBoot` | → Dart `main()` | 67 ms |
-| `dartBootstrap` | → first frame begins | 7 ms |
-| `frameScheduling` | vsync → build starts | 27 ms |
-| `frameBuild` | widget tree | 0.6 ms |
-| `rasterHandoff` | build → raster thread | 0.04 ms |
-| `frameRaster` | rasterizing | 8 ms |
+| Phase | Covers | Median | Share |
+|---|---|---|---|
+| `processInit` | process start → this library loads | 6.0 ms | 7% |
+| `hostStartup` | → first `Activity.onCreate` (Android only) | 7.0 ms | 8% |
+| `engineBoot` | → Dart `main()` | **42.9 ms** | **52%** |
+| `dartBootstrap` | → first frame begins | 3.0 ms | 4% |
+| `frameScheduling` | vsync → build starts | 18.3 ms | 22% |
+| `frameBuild` | widget tree | 0.3 ms | 0.4% |
+| `rasterHandoff` | build → raster thread | 0.03 ms | 0.1% |
+| `frameRaster` | rasterizing | 3.6 ms | 4% |
 
-The phase you would have guessed is rarely the phase that costs. Build and raster
-together were under 5% of that launch.
+The phase you would have guessed is rarely the phase that costs. Build and
+raster together are under 5% here — a team optimising their widget tree would be
+working on a rounding error, while half the launch sits in engine and Dart VM
+startup they never see.
+
+**Measure in release.** The same app in profile mode on the same device totals
+180 ms, and the shares move as well as the total: the platform phases go from
+15% of the launch to 69% of it. Profile-mode startup numbers are not a scaled
+version of release-mode ones, so conclusions drawn from them will point at the
+wrong phase. Emulator numbers are further off again.
+
+Discard the first launch after an install, too. It runs 1.5–2× slower than the
+steady state while the runtime finishes optimising and the page cache fills.
 
 ## Launches it refuses to measure
 
@@ -157,6 +169,11 @@ and the reason is reported:
   platforms with that in mind.
 - **Cold starts only.** Warm starts reuse the process and are not measurable from
   process start; those report `LaunchType.unknown` rather than a guess.
+- **iOS is less exercised than Android.** The iOS path is verified working on
+  the simulator, but not on physical hardware. Simulators have no real dyld cost
+  and never prewarm, so `processInit` and the prewarmed-launch exclusion are the
+  two things least proven here. Treat iOS numbers as provisional until you have
+  run it on a device.
 - **iOS folds pre-`main()` into the first phase.** Capturing dyld time needs an
   Objective-C `+load` or a C constructor, which is machinery out of proportion to
   this package. `processInit` on iOS ends at plugin registration.

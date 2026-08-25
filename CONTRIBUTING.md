@@ -14,12 +14,17 @@ The example app is where the package is actually exercised end to end:
 
 ```bash
 cd example
-flutter run --profile
+flutter run --release
 ```
 
-Use `--profile` or `--release`, never `--debug`. Debug builds run the Dart VM in
-JIT mode, which inflates startup by a factor of several and makes every number
-this package produces meaningless.
+Use `--release` for anything you intend to draw a conclusion from. Debug runs
+the Dart VM in JIT mode and is meaningless for startup. Profile is AOT and looks
+plausible, but on a Galaxy S25 it totals 180 ms against release's 83 ms — and
+the *shares* move too, with the platform phases going from 15% of the launch to
+69%. A profile-mode measurement will point you at the wrong phase.
+
+Discard the first launch after an install; it runs 1.5–2× slower than the steady
+state.
 
 ## Verifying a change
 
@@ -29,8 +34,8 @@ still works, so anything touching Kotlin or Swift needs a real cold launch:
 
 ```bash
 cd example
-flutter build apk --profile
-adb install -r build/app/outputs/flutter-apk/app-profile.apk
+flutter build apk --release
+adb install -r build/app/outputs/flutter-apk/app-release.apk
 
 adb shell am force-stop dev.brunosiqueira.flutter_startup_metrics_example
 adb shell am kill dev.brunosiqueira.flutter_startup_metrics_example
