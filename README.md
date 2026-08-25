@@ -1,12 +1,39 @@
 # flutter_startup_metrics
 
-Measures Flutter cold start from **OS process start** to the **first frame
-Flutter actually rasterizes**, and breaks the gap into phases you can act on.
+Measure **Flutter app startup time** in production — cold start, time to initial
+display (TTID), time to full display (TTFD) — from **OS process start** to the
+**first frame Flutter actually rasterizes**, broken into phases you can act on.
 
-It is not a `Stopwatch` wrapper. It reads the process start time from the
-platform, anchors the endpoint on `FramePhase.rasterFinishWallTime`, and reports
-the phases in between. It sends nothing anywhere — forward the report to whatever
-you already run.
+Works in release builds. Reports the numbers; sends them nowhere, so you can
+forward them to Firebase, Datadog, Sentry, your own backend, or a log line.
+
+```dart
+void main() {
+  FlutterStartupMetrics.start();
+  runApp(const MyApp());
+}
+```
+
+```
+StartupMeasurement(cold, TTID 83ms, TTFD 714ms)
+  processInit:      6.0ms   process start -> library loads
+  hostStartup:      7.0ms   -> first Activity.onCreate
+  engineBoot:      42.9ms   -> Dart main()
+  dartBootstrap:    3.0ms   -> first frame begins
+  frameScheduling: 18.3ms   vsync -> build starts
+  frameBuild:       0.3ms
+  rasterHandoff:    0.03ms
+  frameRaster:      3.6ms
+```
+
+## What this is not
+
+- **Not a `Stopwatch` wrapper.** It reads process start from the platform, so it
+  sees the two thirds of a launch that happen before Dart runs.
+- **Not a debug-only tool.** Flutter's own startup timeline events are compiled
+  out of release builds, and `--trace-startup` is a profile-mode diagnostic.
+  This works in the build your users run, which is the only one that counts.
+- **Not an overlay or a dashboard.** No UI, no uploader, no vendor SDK.
 
 ## Why
 
