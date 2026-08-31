@@ -1,5 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_startup_metrics/flutter_startup_metrics.dart';
+
+/// Release builds on iOS do not route Dart's print to the system log, so the
+/// example forwards its report to a native logger to make on-device runs
+/// observable. Your app would send the report to your metrics backend instead.
+const _deviceLog = MethodChannel('example/device_log');
+
+Future<void> _report(Object message) async {
+  debugPrint('STARTUP_METRICS $message');
+  try {
+    await _deviceLog.invokeMethod<void>('log', 'STARTUP_METRICS $message');
+  } on MissingPluginException {
+    // Android and the simulator read debugPrint directly.
+  }
+}
 
 void main() {
   // First statement: the Dart-entry anchor is taken here, so anything above it
@@ -83,8 +98,7 @@ class _DashboardState extends State<Dashboard> {
 
     // Where you would forward the numbers to whatever you already run. Done
     // here rather than in build(), which Flutter may call many times.
-    final report = await FlutterStartupMetrics.fullDisplay;
-    debugPrint('STARTUP_METRICS $report');
+    await _report(await FlutterStartupMetrics.fullDisplay);
   }
 
   @override

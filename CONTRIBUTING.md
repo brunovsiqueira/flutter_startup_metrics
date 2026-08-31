@@ -68,3 +68,10 @@ noise between two sources.
 **Emulator numbers are not device numbers.** The share of time attributed to
 each phase differs substantially between an emulator and real hardware. Claims
 about where startup time goes need a physical device.
+
+**iOS device runs carry the debugger.** iOS kills a developer-signed app when
+the debugger detaches, so `example/run_ios_device.sh` keeps `debugserver`
+attached for the measured launch. That is fine for verifying behaviour — phases,
+exclusions, platform asymmetry — and wrong for quoting magnitudes, because
+`debugserver` adds real cost to process start. Android has no such constraint,
+so quote Android numbers.
