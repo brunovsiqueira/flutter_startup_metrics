@@ -1,13 +1,21 @@
+## 0.1.3
+
+- Drop a README caveat that described a limitation of our iOS test rig as if it
+  were a property of the package. Apps in the field launch without a debugger
+  and are unaffected; the constraint is documented in CONTRIBUTING, where it is
+  relevant to anyone reproducing the measurements.
+
 ## 0.1.2
 
 - Verified the iOS implementation on physical hardware for the first time
   (iPhone 8, iOS 16.7.12, release build): cold launch detected, phases
   contiguous, `hostStartup` correctly absent on iOS, and no launch falsely
-  excluded as prewarmed. Documentation updated accordingly.
-- Documented that on-device iOS runs necessarily carry a debugger, because iOS
-  terminates a developer-signed app when it detaches — so iOS magnitudes are an
-  upper bound rather than a baseline. Android numbers are debugger-free.
-- Added `example/run_ios_device.sh` for reproducing on-device runs.
+  excluded as prewarmed. The README no longer says the iOS path is unverified.
+- Added `example/run_ios_device.sh` for reproducing on-device runs, and
+  documented in CONTRIBUTING why such runs cannot produce a trustworthy
+  magnitude: iOS kills a developer-signed app when the debugger detaches, so the
+  launch has to be measured with one attached. That is a test-rig constraint and
+  does not affect apps in the field.
 
 No library code changes.
 

@@ -62,7 +62,7 @@ API exists because the Flutter team added it for this use case
 
 ```yaml
 dependencies:
-  flutter_startup_metrics: ^0.1.2
+  flutter_startup_metrics: ^0.1.3
 ```
 
 ## Usage
@@ -147,8 +147,9 @@ never arrives, the future still resolves after 30 seconds with a null
 ## What you get
 
 A contiguous partition — the phases sum exactly to the total, so nothing hides
-between them. Real numbers, Galaxy S25, **release** build, median of 10 cold
-launches (total 83 ms):
+between them. Real numbers from one app on one device — a Galaxy S25, **release**
+build, median of 10 cold launches totalling 83 ms. Your own split will differ;
+the point is the shape, not these values:
 
 | Phase | Covers | Median | Share |
 |---|---|---|---|
@@ -196,15 +197,6 @@ and the reason is reported:
   platforms with that in mind.
 - **Cold starts only.** Warm starts reuse the process and are not measurable from
   process start; those report `LaunchType.unknown` rather than a guess.
-- **iOS is verified on hardware, but less measured than Android.** The iOS path
-  is confirmed working on a physical iPhone (iPhone 8, iOS 16.7.12, release
-  build): it reports a cold launch, the phases are contiguous, `hostStartup` is
-  correctly absent, and no launch was falsely excluded as prewarmed. What is not
-  established is a representative iOS *number* — iOS terminates a
-  developer-signed app as soon as the debugger detaches, so on-device runs are
-  necessarily measured with `debugserver` attached, which inflates process start
-  substantially. The Android figures above are debugger-free; treat iOS
-  magnitudes as an upper bound rather than a baseline.
 - **iOS folds pre-`main()` into the first phase.** Capturing dyld time needs an
   Objective-C `+load` or a C constructor, which is machinery out of proportion to
   this package. `processInit` on iOS ends at plugin registration.

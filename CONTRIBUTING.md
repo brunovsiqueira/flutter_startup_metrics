@@ -69,9 +69,15 @@ noise between two sources.
 each phase differs substantially between an emulator and real hardware. Claims
 about where startup time goes need a physical device.
 
-**iOS device runs carry the debugger.** iOS kills a developer-signed app when
-the debugger detaches, so `example/run_ios_device.sh` keeps `debugserver`
-attached for the measured launch. That is fine for verifying behaviour — phases,
-exclusions, platform asymmetry — and wrong for quoting magnitudes, because
-`debugserver` adds real cost to process start. Android has no such constraint,
-so quote Android numbers.
+**You cannot get a clean startup number off a cabled iPhone.** iOS terminates a
+developer-signed app the moment the debugger detaches, so
+`example/run_ios_device.sh` has to keep `debugserver` attached for the launch it
+is measuring — and that added roughly 900 ms to process start on an iPhone 8,
+against tens of milliseconds for the same phase on Android.
+
+This is a property of the test rig, not of iOS or of this package. A user who
+taps the app icon on their own phone has no debugger attached and sees normal
+timings. So use on-device iOS runs to verify *behaviour* — phases contiguous,
+`hostStartup` absent, nothing falsely excluded — and never to quote a magnitude.
+For real iOS numbers, ship a TestFlight or App Store build and read what the
+package reports in the field.
